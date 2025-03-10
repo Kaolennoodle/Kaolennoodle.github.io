@@ -71,6 +71,108 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-安装Typecho的坎坷之旅" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/2025/03/10/%E5%AE%89%E8%A3%85Typecho%E7%9A%84%E5%9D%8E%E5%9D%B7%E4%B9%8B%E6%97%85/" class="article-date">
+  <time class="dt-published" datetime="2025-03-10T10:01:40.000Z" itemprop="datePublished">2025-03-10</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="p-name article-title" href="/2025/03/10/%E5%AE%89%E8%A3%85Typecho%E7%9A%84%E5%9D%8E%E5%9D%B7%E4%B9%8B%E6%97%85/">安装Typecho的坎坷之旅</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>按照家中之前的网络架构，Typecho应由独立的服务器运行，并由接通外网的Nginx进行SSL加密与反向代理。然而配置了Handsome主题的Typecho页面包含需要单独向服务器发送请求的组件，这使得在用公网访问Typecho时，在浏览器后台会出现<code>Mixed Content</code>报错，即在通过HTTPS加载的界面上出现了尝试发出HTTP的请求的组件。</p>
+<p>在经历了历时三天的各种调试后依然无法解决这个问题，因为即便设法使组件向公网域名发送请求，也无法限制其向指定的端口发送。（家宽的443端口不通，其他服务都是访问88端口）最终决定直接在反代服务器上部署Nginx。</p>
+<p>[scode type&#x3D;”yellow” size&#x3D;””]以下的步骤中不会包含如何配置反向代理，同时也不建议对Typecho使用反向代理。[&#x2F;scode]</p>
+<p>[scode type&#x3D;”green” size&#x3D;””]2024年11月30日更新，目前已经通过带有公共端口的服务器内网穿透至家庭反代服务器。如果拥有公网IP且80端口和443端口可用，则可以像反代普通网站一样反代Typecho，无论你使用了哪些插件或主题。[&#x2F;scode]</p>
+<p>[scode type&#x3D;”blue” size&#x3D;””]整个安装过程基于Ubuntu 24.04 LTS，如果你使用其他操作系统，请酌情参考。[&#x2F;scode]</p>
+<h1 id="安装依赖"><a href="#安装依赖" class="headerlink" title="安装依赖"></a>安装依赖</h1><p>Typecho 需要 PHP 和 MySQL&#x2F;PostgreSQL&#x2F;SQLite 数据库支持，接下来我们将逐步安装需要的依赖。</p>
+<h3 id="更新系统"><a href="#更新系统" class="headerlink" title="更新系统"></a>更新系统</h3><p>首先，更新系统包列表并升级所有包：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> apt update</span><br><span class="line"><span class="built_in">sudo</span> apt upgrade -y</span><br></pre></td></tr></table></figure>
+
+<h3 id="安装PHP"><a href="#安装PHP" class="headerlink" title="安装PHP"></a>安装PHP</h3><p>Typecho 需要 PHP 和 以及其必要扩展的支持。</p>
+<p>安装PHP及其必要扩展：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> apt install -y php-fpm php-mysql php-curl php-mbstring</span><br></pre></td></tr></table></figure>
+
+<h3 id="安装MySQL"><a href="#安装MySQL" class="headerlink" title="安装MySQL"></a>安装MySQL</h3><p>安装MySQL：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> apt install -y mysql-server</span><br></pre></td></tr></table></figure>
+
+<h3 id="安装Nginx"><a href="#安装Nginx" class="headerlink" title="安装Nginx"></a>安装Nginx</h3><h5 id="冲突排除"><a href="#冲突排除" class="headerlink" title="冲突排除"></a>冲突排除</h5><p>[scode type&#x3D;”yellow” size&#x3D;””]Nginx需要使用80端口，这可能与其他的Web服务器冲突，请确保安装之前没有其他服务占用80端口[&#x2F;scode]</p>
+<p>为了避免安装时出现错误，我们需要提前检查系统中有没有预装Apache2。首先，使用<code>apache2 -v</code>检查系统中是否安装了 Apache2，如果你看到了类似如下的输出，请继续接下来的操作，否则请直接跳转至安装Nginx的部分。</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Server version: Apache/2.4.41 (Ubuntu)</span><br><span class="line">Server built:   2020-08-12T19:46:17</span><br></pre></td></tr></table></figure>
+
+<p>停止 Apache2 服务：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> systemctl stop apache2</span><br></pre></td></tr></table></figure>
+
+<p>禁用 Apache2 服务：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> systemctl <span class="built_in">disable</span> apache2</span><br></pre></td></tr></table></figure>
+
+<p>完全移除 Apache2 及其相关包：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> apt purge apache2 apache2-utils apache2-bin apache2.2-common</span><br><span class="line"><span class="built_in">sudo</span> apt autoremove -y</span><br></pre></td></tr></table></figure>
+
+<p>这时再次使用<code>apache2 -v</code>检查，如果你看到 <code>command not found</code> 的提示，说明 Apache2 已经被成功移除。</p>
+<p>完成上述步骤后，我们可以继续按照前述步骤安装并配置 Nginx 以及其他所需组件。</p>
+<h5 id="正式安装Nginx"><a href="#正式安装Nginx" class="headerlink" title="正式安装Nginx"></a>正式安装Nginx</h5><p>安装Nginx：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> apt install -y nginx</span><br></pre></td></tr></table></figure>
+
+<h1 id="配置数据库"><a href="#配置数据库" class="headerlink" title="配置数据库"></a>配置数据库</h1><p>使用超级用户直接进入MySQL：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> mysql</span><br></pre></td></tr></table></figure>
+
+<p>[scode type&#x3D;”yellow” size&#x3D;””]这里进入数据库的方式并不安全，如果对安全有较高要求，请运行<code>sudo mysql_secure_installation</code>按照提示配置MySQL的安全性。[&#x2F;scode]</p>
+<p>在 MySQL 提示符下，执行以下命令：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> DATABASE typecho_db;</span><br><span class="line"><span class="keyword">CREATE</span> <span class="keyword">USER</span> <span class="string">&#x27;typecho_user&#x27;</span>@<span class="string">&#x27;localhost&#x27;</span> IDENTIFIED <span class="keyword">BY</span> <span class="string">&#x27;your_password&#x27;</span>;</span><br><span class="line"><span class="keyword">GRANT</span> <span class="keyword">ALL</span> PRIVILEGES <span class="keyword">ON</span> typecho_db.<span class="operator">*</span> <span class="keyword">TO</span> <span class="string">&#x27;typecho_user&#x27;</span>@<span class="string">&#x27;localhost&#x27;</span>;</span><br><span class="line">FLUSH PRIVILEGES;</span><br><span class="line">EXIT;</span><br></pre></td></tr></table></figure>
+
+<p>将其中的<code>typecho_db</code>替换为你希望Typecho使用的数据库名，对应的，将<code>typecho_user</code>和<code>your_password</code>替换为你希望Typcho使用的数据库账户和密码。</p>
+<h1 id="部署Typecho"><a href="#部署Typecho" class="headerlink" title="部署Typecho"></a>部署Typecho</h1><h3 id="下载Typecho及其主题"><a href="#下载Typecho及其主题" class="headerlink" title="下载Typecho及其主题"></a>下载Typecho及其主题</h3><p>从<a target="_blank" rel="noopener" href="https://typecho.org/">Typecho官网</a>下载最新的正式版压缩包，并将其解压至Web根目录。我们目前的环境下，Web根目录为<code>/var/www/html</code>为了方便管理，我们最好为Typecho新建一个文件夹：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> <span class="built_in">mkdir</span> /var/www/html/typecho</span><br></pre></td></tr></table></figure>
+
+<p>将下载的压缩包上传至服务器并解压至刚刚新建的目录，解压完成后，确保<code>install.php</code>或<code>index.php</code>处于该路径下。[scode type&#x3D;”share” size&#x3D;””]如果压缩包为<code>.zip</code>格式，你可能需要安装unzip。[&#x2F;scode]</p>
+<p>从<a target="_blank" rel="noopener" href="https://www.ihewro.com/archives/489/">友人C的博客</a>购买并下载Handsome主题，并解压至<code>/var/www/html/typecho/usr/themes</code>目录，同时，将配套的插件存放至<code>/var/www/html/typecho/usr/plugins</code>。</p>
+<p>[scode type&#x3D;”green” size&#x3D;””]如果不确定是否需要该款主题，可以<a target="_blank" rel="noopener" href="https://blog.naixi.net/article/handsome">点击这里</a>试用该主题，日后再决定是否购买。[&#x2F;scode]</p>
+<p>为了Web服务器能正常访问这些文件，我们需要为其设置正确的权限：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> <span class="built_in">chown</span> -R www-data:www-data /var/www/html/typecho</span><br><span class="line"><span class="built_in">sudo</span> <span class="built_in">chmod</span> -R 755 /var/www/html/typecho</span><br></pre></td></tr></table></figure>
+
+<h3 id="编辑Nginx配置文件"><a href="#编辑Nginx配置文件" class="headerlink" title="编辑Nginx配置文件"></a>编辑Nginx配置文件</h3><p>为 Typecho 配置一个新的 Nginx 站点：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> vim /etc/nginx/sites-available/typecho</span><br></pre></td></tr></table></figure>
+
+<p>在文件中添加以下配置：</p>
+<figure class="highlight nginx"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="section">server</span> &#123;</span><br><span class="line">    <span class="attribute">listen</span> <span class="number">88</span> ssl http2; <span class="comment"># 请求端口</span></span><br><span class="line">    <span class="attribute">listen</span> [::]:<span class="number">88</span> ssl http2;</span><br><span class="line">    <span class="attribute">server_name</span> blog.wanglele.top; <span class="comment"># 申请的域名</span></span><br><span class="line">    <span class="attribute">ssl_certificate</span> /etc/nginx/cert/cert.pem;</span><br><span class="line">    <span class="attribute">ssl_certificate_key</span> /etc/nginx/cert/key.pem; <span class="comment"># 申请好的证书</span></span><br><span class="line"></span><br><span class="line">    <span class="attribute">root</span> /var/www/html/typecho;</span><br><span class="line">    <span class="attribute">index</span> index.php index.html index.htm;</span><br><span class="line"></span><br><span class="line">    <span class="section">location</span> / &#123;</span><br><span class="line">       <span class="attribute">try_files</span> <span class="variable">$uri</span> <span class="variable">$uri</span>/ /index.php?<span class="variable">$query_string</span>;</span><br><span class="line">    &#125;</span><br><span class="line">  </span><br><span class="line">    <span class="section">location</span> <span class="regexp">~ \.php$</span> &#123;</span><br><span class="line">        <span class="attribute">include</span> snippets/fastcgi-php.conf;</span><br><span class="line">        <span class="attribute">fastcgi_pass</span> unix:/var/run/php/php8.3-fpm.sock; <span class="comment"># 确保路径正确</span></span><br><span class="line">    &#125;</span><br><span class="line">  </span><br><span class="line">    <span class="section">location</span> <span class="regexp">~ /\.ht</span> &#123;</span><br><span class="line">        <span class="attribute">deny</span> all;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>[scode type&#x3D;”yellow” size&#x3D;””]请务必注意第17行的路径，不同版本的PHP路径中的版本号会有变化。域名、证书、公网IP请自行解决，不在本文讨论范围。[&#x2F;scode]</p>
+<p>启用新的配置并重启Nginx：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">sudo</span> <span class="built_in">ln</span> -s /etc/nginx/sites-available/typecho /etc/nginx/sites-enabled/</span><br><span class="line"><span class="built_in">sudo</span> systemctl restart nginx</span><br></pre></td></tr></table></figure>
+
+<h3 id="访问Typecho"><a href="#访问Typecho" class="headerlink" title="访问Typecho"></a>访问Typecho</h3><p>此时访问你的域名+端口，理论上应该可以进入Typecho的初始化界面了。按照之前的配置正确填写数据库信息，并新建管理员账号就可以使用了。</p>
+<h1 id="结语"><a href="#结语" class="headerlink" title="结语"></a>结语</h1><p>Typecho的安装本身并不复杂，我的大部分时间都花在了尝试进行反向代理上。中间踩过的坑主要集中在MySQL的权限问题和PHP的版本问题。如果直接使用apt安装PHP，不会安装PHP-fpm以及MySQL的扩展。</p>
+<p>这是本博客的第一篇文章，希望我能一直保持记录的热情。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://example.com/2025/03/10/%E5%AE%89%E8%A3%85Typecho%E7%9A%84%E5%9D%8E%E5%9D%B7%E4%B9%8B%E6%97%85/" data-id="cm82w9f7l00012dcc5wws4nzt" data-title="安装Typecho的坎坷之旅" class="article-share-link"><span class="fa fa-share">Share</span></a>
+      
+      
+      
+    </footer>
+  </div>
+  
+</article>
+
+
+
+  
     <article id="post-hello-world" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
   <div class="article-meta">
     <a href="/2025/03/10/hello-world/" class="article-date">
@@ -110,7 +212,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://example.com/2025/03/10/hello-world/" data-id="cm82vwvvr0000y9cc6v5r9ule" data-title="Hello World" class="article-share-link"><span class="fa fa-share">Share</span></a>
+      <a data-url="http://example.com/2025/03/10/hello-world/" data-id="cm82w9f7i00002dccdio746o5" data-title="Hello World" class="article-share-link"><span class="fa fa-share">Share</span></a>
       
       
       
@@ -151,6 +253,10 @@
     <h3 class="widget-title">Recent Posts</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2025/03/10/%E5%AE%89%E8%A3%85Typecho%E7%9A%84%E5%9D%8E%E5%9D%B7%E4%B9%8B%E6%97%85/">安装Typecho的坎坷之旅</a>
+          </li>
         
           <li>
             <a href="/2025/03/10/hello-world/">Hello World</a>
